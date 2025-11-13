@@ -170,6 +170,10 @@ class ApplyInPandasWithStatePythonRunner(
       super[PythonArrowInput].close()
       false
     }
+
+    val deltaData = dataOut.size() - startData
+    pythonMetrics("pythonDataSent") += deltaData
+    hasInput
   }
 
   /**

@@ -144,6 +144,9 @@ class TransformWithStateInPySparkPythonInitialStateRunner(
 
   private var pandasWriter: BaseStreamingArrowWriter = _
 
+  private var currentDataIterator: Iterator[InternalRow] = _
+  private var currentInitIterator: Iterator[InternalRow] = _
+
   override protected def writeNextBatchToArrowStream(
       root: VectorSchemaRoot,
       writer: ArrowStreamWriter,
@@ -158,30 +161,55 @@ class TransformWithStateInPySparkPythonInitialStateRunner(
       )
     }
 
-    if (inputIterator.hasNext) {
-      val startData = dataOut.size()
-      // a new grouping key with data & init state iter
-      val next = inputIterator.next()
-      val dataIter = next._2
-      val initIter = next._3
+    // If we don't have data left for the current group, move to the next group.
+    if (currentDataIterator == null && currentInitIterator == null && inputIterator.hasNext) {
+      val (_, dataIter, initIter) = inputIterator.next()
+      currentDataIterator = dataIter
+      currentInitIterator = initIter
+    }
 
-      while (dataIter.hasNext || initIter.hasNext) {
-        val dataRow =
-          if (dataIter.hasNext) dataIter.next()
-          else InternalRow.empty
-        val initRow =
-          if (initIter.hasNext) initIter.next()
-          else InternalRow.empty
-        pandasWriter.writeRow(InternalRow(dataRow, initRow))
+    val startData = dataOut.size()
+    val hasInput = if (currentDataIterator != null || currentInitIterator != null) {
+      var isCurrentBatchFull = false
+      // Stop writing when the current arrowBatch is finalized/full. If we have rows left
+      while (
+        (
+          (currentDataIterator != null && currentDataIterator.hasNext)
+          || (currentInitIterator != null && currentInitIterator.hasNext)
+        ) && !isCurrentBatchFull) {
+
+        val dataRow = if (currentDataIterator != null && currentDataIterator.hasNext) {
+          currentDataIterator.next()
+        } else {
+          InternalRow.empty
+        }
+
+        val initRow = if (currentInitIterator != null && currentInitIterator.hasNext) {
+          currentInitIterator.next()
+        } else {
+          InternalRow.empty
+        }
+
+        isCurrentBatchFull = pandasWriter.writeRow(InternalRow(dataRow, initRow))
       }
-      pandasWriter.finalizeCurrentArrowBatch()
-      val deltaData = dataOut.size() - startData
-      pythonMetrics("pythonDataSent") += deltaData
+
+      if (currentDataIterator != null && !currentDataIterator.hasNext) {
+        currentDataIterator = null
+      }
+
+      if (currentInitIterator != null && !currentInitIterator.hasNext) {
+        currentInitIterator = null
+      }
+
       true
     } else {
+      pandasWriter.finalizeCurrentArrowBatch()
       super[PythonArrowInput].close()
       false
     }
+    val deltaData = dataOut.size() - startData
+    pythonMetrics("pythonDataSent") += deltaData
+    hasInput
   }
 }
 

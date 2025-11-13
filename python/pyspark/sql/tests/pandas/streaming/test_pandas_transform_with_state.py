@@ -1415,6 +1415,18 @@ class TransformWithStateTestsMixin:
             },
         ]
 
+        # TODO(arsenii.krasikov/zerui.bao/...): we don't apply limit for initial state batch.
+        result_with_small_limit_with_initial_state = [
+            {
+                Row(id="0", chunkCount=1),
+                Row(id="1", chunkCount=1),
+            },
+            {
+                Row(id="0", chunkCount=3),
+                Row(id="1", chunkCount=2),
+            },
+        ]
+
         result_with_large_limit = [
             {
                 Row(id="0", chunkCount=1),
@@ -1446,7 +1458,7 @@ class TransformWithStateTestsMixin:
 
             self._test_transform_with_state_basic(
                 ChunkCountProcessorWithInitialStateFactory(),
-                make_check_results(result_with_small_limit),
+                make_check_results(result_with_small_limit_with_initial_state),
                 initial_state=initial_state,
                 output_schema=StructType(
                     [
